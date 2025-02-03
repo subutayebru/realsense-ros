@@ -1,19 +1,23 @@
-#include "realsense2_camera/t265_realsense_node.h"
+#include "../include/t265_realsense_node.h"
 
 using namespace realsense2_camera;
 
 T265RealsenseNode::T265RealsenseNode(ros::NodeHandle& nodeHandle,
                                      ros::NodeHandle& privateNodeHandle,
                                      rs2::device dev,
-                                     const std::string& serial_no) : 
-                                     BaseRealSenseNode(nodeHandle, privateNodeHandle, dev, serial_no),
-                                     _wo_snr(dev.first<rs2::wheel_odometer>()),
-                                     _use_odom_in(false) 
-                                     {
-                                         _monitor_options = {RS2_OPTION_ASIC_TEMPERATURE, RS2_OPTION_MOTION_MODULE_TEMPERATURE};
-                                         initializeOdometryInput();
-                                         handleWarning();
-                                     }
+                                     const std::string& serial_no) 
+    : BaseRealSenseNode(nodeHandle, privateNodeHandle, dev, serial_no),
+      _wo_snr(dev.first<rs2::wheel_odometer>()),
+      _use_odom_in(false)
+{
+    _monitor_options = {RS2_OPTION_ASIC_TEMPERATURE, RS2_OPTION_MOTION_MODULE_TEMPERATURE};
+    initializeOdometryInput();
+    handleWarning();
+    
+    //ros::Publisher pose_pub_;
+    pose_pub_ = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/pose", 10);
+    
+}
 
 void T265RealsenseNode::initializeOdometryInput()
 {
@@ -28,43 +32,44 @@ void T265RealsenseNode::initializeOdometryInput()
     if (!calibrationFile)
     {
         ROS_FATAL_STREAM("calibration_odometry file not found. calib_odom_file = " << calib_odom_file);
-        throw std::runtime_error("calibration_odometry file not found" );
+        throw std::runtime_error("calibration_odometry file not found");
     }
     const std::string json_str((std::istreambuf_iterator<char>(calibrationFile)),
-        std::istreambuf_iterator<char>());
+                               std::istreambuf_iterator<char>());
     const std::vector<uint8_t> wo_calib(json_str.begin(), json_str.end());
 
     if (!_wo_snr.load_wheel_odometery_config(wo_calib))
     {
         ROS_FATAL_STREAM("Format error in calibration_odometry file: " << calib_odom_file);
-        throw std::runtime_error("Format error in calibration_odometry file" );
+        throw std::runtime_error("Format error in calibration_odometry file");
     }
     _use_odom_in = true;
 }
 
 void T265RealsenseNode::toggleSensors(bool enabled)
 {
-  ROS_WARN_STREAM("toggleSensors method not implemented for T265");
+    ROS_WARN_STREAM("toggleSensors method not implemented for T265");
 }
 
 void T265RealsenseNode::publishTopics()
 {
     BaseRealSenseNode::publishTopics();
     setupSubscribers();
+
 }
 
-void  T265RealsenseNode::handleWarning()
+void T265RealsenseNode::handleWarning()
 {
-    rs2::log_to_callback( rs2_log_severity::RS2_LOG_SEVERITY_WARN, [&]
-      ( rs2_log_severity severity, rs2::log_message const & msg ) noexcept {
-        _T265_fault =  msg.raw();
+    rs2::log_to_callback(rs2_log_severity::RS2_LOG_SEVERITY_WARN, [&]
+      (rs2_log_severity severity, rs2::log_message const & msg) noexcept {
+        _T265_fault = msg.raw();
         std::array<std::string, 2> list_of_fault{"SLAM_ERROR", "Stream transfer failed, exiting"};
         auto it = std::find_if(begin(list_of_fault), end(list_of_fault),
                   [&](const std::string& s) {return _T265_fault.find(s) != std::string::npos; });
         if (it != end(list_of_fault))
         {
-          callback_updater.add("Warning ",this, & T265RealsenseNode::warningDiagnostic);
-          callback_updater.force_update();
+            callback_updater.add("Warning ",this, & T265RealsenseNode::warningDiagnostic);
+            callback_updater.force_update();
         }
     });
 }
@@ -78,11 +83,20 @@ void T265RealsenseNode::setupSubscribers()
     ROS_INFO_STREAM("Subscribing to in_odom topic: " << topic_odom_in);
 
     _odom_subscriber = _node_handle.subscribe(topic_odom_in, 1, &T265RealsenseNode::odom_in_callback, this);
+    _odom_subscriber = _node_handle.subscribe("/camera/pose/pose", 10, &T265RealsenseNode::odom_in_callback, this);
 }
 
 void T265RealsenseNode::odom_in_callback(const nav_msgs::Odometry::ConstPtr& msg)
 {
     ROS_DEBUG("Got in_odom message");
+    ROS_DEBUG("Got in_odom message");
+    if (msg->pose.pose.position.x == 0 && msg->pose.pose.position.y == 0 && msg->pose.pose.position.z == 0) {
+        ROS_WARN("Received odometry with zero position");
+    }
+    ROS_INFO_STREAM("Odometry Position: " << msg->pose.pose.position.x
+                                            << ", " << msg->pose.pose.position.y
+                                            << ", " << msg->pose.pose.position.z);
+
     rs2_vector velocity {-(float)(msg->twist.twist.linear.y),
                           (float)(msg->twist.twist.linear.z),
                          -(float)(msg->twist.twist.linear.x)};
@@ -142,5 +156,31 @@ void T265RealsenseNode::calcAndPublishStaticTransform(const stream_index_pair& s
 
 void T265RealsenseNode::warningDiagnostic(diagnostic_updater::DiagnosticStatusWrapper& status)
 {
-  status.summary(diagnostic_msgs::DiagnosticStatus::WARN, _T265_fault);
+    status.summary(diagnostic_msgs::DiagnosticStatus::WARN, _T265_fault);
+}
+
+void T265RealsenseNode::publishPoseStamped(const nav_msgs::Odometry::ConstPtr& odom_msg)
+{   ROS_WARN("publishPoseStamped function was called!");
+    geometry_msgs::PoseStamped pose_msg;
+    pose_msg.header = odom_msg->header;
+
+    pose_msg.header.stamp = ros::Time::now();  // Set the timestamp
+    pose_msg.header.frame_id = "camera_pose_frame";  // Set the frame ID
+
+    // Convert T265 coordinate frame (Z-forward) to MAVROS ENU (X-forward)
+    pose_msg.pose.position.x = odom_msg->pose.pose.position.z;
+    pose_msg.pose.position.y = -odom_msg->pose.pose.position.x;
+    pose_msg.pose.position.z = -odom_msg->pose.pose.position.y;
+
+    pose_msg.pose.orientation.w = odom_msg->pose.pose.orientation.w;
+    pose_msg.pose.orientation.x = odom_msg->pose.pose.orientation.z;
+    pose_msg.pose.orientation.y = -odom_msg->pose.pose.orientation.x;
+    pose_msg.pose.orientation.z = -odom_msg->pose.pose.orientation.y;
+
+    ROS_INFO_STREAM("Publishing Pose: " << pose_msg.pose.position.x 
+                                         << ", " << pose_msg.pose.position.y 
+                                         << ", " << pose_msg.pose.position.z);
+
+    pose_pub_.publish(pose_msg);
+    printf("NISHTA!!!!!");
 }

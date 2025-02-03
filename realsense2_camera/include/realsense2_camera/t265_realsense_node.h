@@ -1,6 +1,4 @@
-#pragma once
-
-#include <realsense2_camera/base_realsense_node.h>
+#include <base_realsense_node.h>
 
 namespace realsense2_camera
 {
@@ -8,26 +6,35 @@ namespace realsense2_camera
     {
         public:
             T265RealsenseNode(ros::NodeHandle& nodeHandle,
-                          ros::NodeHandle& privateNodeHandle,
-                          rs2::device dev,
-                          const std::string& serial_no);
+                              ros::NodeHandle& privateNodeHandle,
+                              rs2::device dev,
+                              const std::string& serial_no);
+            
             virtual void toggleSensors(bool enabled) override;
             virtual void publishTopics() override;
 
         protected:
-            void calcAndPublishStaticTransform(const stream_index_pair& stream, const rs2::stream_profile& base_profile) override;
+            void calcAndPublishStaticTransform(const stream_index_pair& stream, 
+                                               const rs2::stream_profile& base_profile) override;
 
         private:
             void initializeOdometryInput();
             void setupSubscribers();
-            void handleWarning();   
+            void handleWarning();
             void odom_in_callback(const nav_msgs::Odometry::ConstPtr& msg);
-            void warningDiagnostic (diagnostic_updater::DiagnosticStatusWrapper &stat);
+            void warningDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat);
             diagnostic_updater::Updater callback_updater;
 
+            // Declare the ROS Publisher for pose data
+            ros::Publisher pose_pub_; // Corrected the variable name to pose_pub_
+
+            // Declare other necessary variables
             ros::Subscriber _odom_subscriber;
             rs2::wheel_odometer _wo_snr;
+            
+            void publishPoseStamped(const nav_msgs::Odometry::ConstPtr& odom_msg);
+
             bool _use_odom_in;
-            std::string  _T265_fault;
+            std::string _T265_fault;
     };
 }
