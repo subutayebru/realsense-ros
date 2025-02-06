@@ -343,4 +343,3 @@ namespace realsense2_camera
     };//end class
 
 }
-
