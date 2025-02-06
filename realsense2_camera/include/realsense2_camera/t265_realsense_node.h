@@ -26,7 +26,7 @@ namespace realsense2_camera
             diagnostic_updater::Updater callback_updater;
 
             // Declare the ROS Publisher for pose data
-            ros::Publisher pose_pub_; // Corrected the variable name to pose_pub_
+            ros::Publisher _pose_stamped_pub_; // Corrected the variable name to pose_pub_
 
             // Declare other necessary variables
             ros::Subscriber _odom_subscriber;

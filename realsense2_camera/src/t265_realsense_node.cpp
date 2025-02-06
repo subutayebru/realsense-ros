@@ -12,7 +12,7 @@ T265RealsenseNode::T265RealsenseNode(ros::NodeHandle& nodeHandle,
       _use_odom_in(false)
 
 {
-    pose_pub_ = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/sample", 10);
+    _pose_stamped_pub = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/sample", 100);
     _monitor_options = {RS2_OPTION_ASIC_TEMPERATURE, RS2_OPTION_MOTION_MODULE_TEMPERATURE};
     initializeOdometryInput();
     handleWarning(); 

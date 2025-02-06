@@ -963,11 +963,13 @@ void BaseRealSenseNode::setupPublishers()
 {
     ROS_INFO("setupPublishers...");
     image_transport::ImageTransport image_transport(_node_handle);
-
+    
     for (auto& stream : IMAGE_STREAMS)
     {
+        
         if (_enable[stream])
         {
+            
             std::stringstream image_raw, camera_info, topic_metadata;
             bool rectified_image = false;
             if (stream == DEPTH || stream == CONFIDENCE || stream == INFRA1 || stream == INFRA2)
@@ -1027,6 +1029,7 @@ void BaseRealSenseNode::setupPublishers()
     {
         _imu_publishers[POSE] = _node_handle.advertise<nav_msgs::Odometry>("odom/sample", 100);
         _metadata_publishers[POSE] = std::make_shared<ros::Publisher>(_node_handle.advertise<realsense2_camera::Metadata>("odom/metadata", 1));
+        _pose_stamped_pub = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/sample", 10);
     }
 
     // if (_enable[POSE_STAMPED])
@@ -1059,7 +1062,7 @@ void BaseRealSenseNode::setupPublishers()
     {
         _depth_to_other_extrinsics_publishers[INFRA2] = _node_handle.advertise<Extrinsics>("extrinsics/depth_to_infra2", 1, true);
     }
-    _pose_stamped_pub = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/sample", 100);
+    
 }
 
 void BaseRealSenseNode::enable_devices()
@@ -1569,6 +1572,10 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
     pose_msg.pose.orientation.y = -pose.rotation.x;
     pose_msg.pose.orientation.z =  pose.rotation.y;
     pose_msg.pose.orientation.w =  pose.rotation.w;
+    pose_msg.header.stamp = t;
+    pose_msg.header.frame_id = _odom_frame_id;
+    _pose_stamped_pub.publish(pose_msg);
+    ROS_DEBUG("Published PoseStamped message on /camera/pose/sample");
 
     // Broadcast TF
     static tf2_ros::TransformBroadcaster br;
@@ -1611,6 +1618,8 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
         tfv = tf::quatRotate(q, tfv);
         tf::vector3TFToMsg(tfv, om_msg.vector);
 
+        
+
         nav_msgs::Odometry odom_msg;
         _seq[stream_index] += 1;
         odom_msg.header.frame_id = _odom_frame_id;
@@ -1637,11 +1646,7 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
     }
 
     // --- ✅ Publish the PoseStamped message ---
-    pose_msg.header.stamp = t;
-    pose_msg.header.frame_id = _odom_frame_id;
-    _pose_stamped_pub.publish(pose_msg);
-    ROS_DEBUG("Published PoseStamped message on /camera/pose/sample");
-
+    
     // Publish metadata
     publishMetadata(frame, _frame_id[POSE]);
 }
