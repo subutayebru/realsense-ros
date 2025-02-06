@@ -100,6 +100,7 @@ catkin_package(
     image_transport
     ddynamic_reconfigure
     nav_msgs
+    geometry_msgs
     )
 
 add_library(${PROJECT_NAME}

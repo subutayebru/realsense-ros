@@ -1029,11 +1029,11 @@ void BaseRealSenseNode::setupPublishers()
         _metadata_publishers[POSE] = std::make_shared<ros::Publisher>(_node_handle.advertise<realsense2_camera::Metadata>("odom/metadata", 1));
     }
 
-    if (_enable[POSE_STAMPED])
-    {
-        _imu_publishers[POSE_STAMPED] = _node_handle.advertise<geometry_msgs::PoseStamped>("pose/sample", 100);
-        _metadata_publishers[POSE_STAMPED] = std::make_shared<ros::Publisher>(_node_handle.advertise<realsense2_camera::Metadata>("pose/metadata", 1));
-    }
+    // if (_enable[POSE_STAMPED])
+    // {
+    //     _imu_publishers[POSE_STAMPED] = _node_handle.advertise<geometry_msgs::PoseStamped>("pose/sample", 100);
+    //     _metadata_publishers[POSE_STAMPED] = std::make_shared<ros::Publisher>(_node_handle.advertise<realsense2_camera::Metadata>("pose/metadata", 1));
+    // }
 
 
     if (_enable[FISHEYE] &&
@@ -1059,6 +1059,7 @@ void BaseRealSenseNode::setupPublishers()
     {
         _depth_to_other_extrinsics_publishers[INFRA2] = _node_handle.advertise<Extrinsics>("extrinsics/depth_to_infra2", 1, true);
     }
+    _pose_stamped_pub = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/sample", 100);
 }
 
 void BaseRealSenseNode::enable_devices()
@@ -1545,24 +1546,22 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
 {
     double frame_time = frame.get_timestamp();
     bool placeholder_false(false);
-    if (_is_initialized_time_base.compare_exchange_strong(placeholder_false, true) )
+    if (_is_initialized_time_base.compare_exchange_strong(placeholder_false, true))
     {
         _is_initialized_time_base = setBaseTime(frame_time, frame.get_frame_timestamp_domain());
     }
 
     ROS_DEBUG("Frame arrived: stream: %s ; index: %d ; Timestamp Domain: %s",
-                rs2_stream_to_string(frame.get_profile().stream_type()),
-                frame.get_profile().stream_index(),
-                rs2_timestamp_domain_to_string(frame.get_frame_timestamp_domain()));
+              rs2_stream_to_string(frame.get_profile().stream_type()),
+              frame.get_profile().stream_index(),
+              rs2_timestamp_domain_to_string(frame.get_frame_timestamp_domain()));
 
-    // Use the key for the pose stream (assumed defined as POSE)
     const auto& stream_index(POSE);
     rs2_pose pose = frame.as<rs2::pose_frame>().get_pose_data();
     ros::Time t(frameSystemTimeSec(frame));
 
-    // Build the PoseStamped message using the pose data
+    // Build the PoseStamped message
     geometry_msgs::PoseStamped pose_msg;
-    // The coordinate conversion here mirrors the odometry conversion:
     pose_msg.pose.position.x = -pose.translation.z;
     pose_msg.pose.position.y = -pose.translation.x;
     pose_msg.pose.position.z =  pose.translation.y;
@@ -1571,7 +1570,7 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
     pose_msg.pose.orientation.z =  pose.rotation.y;
     pose_msg.pose.orientation.w =  pose.rotation.w;
 
-    // (Broadcast TF as before)
+    // Broadcast TF
     static tf2_ros::TransformBroadcaster br;
     geometry_msgs::TransformStamped msg;
     msg.header.stamp = t;
@@ -1584,6 +1583,7 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
     msg.transform.rotation.y = pose_msg.pose.orientation.y;
     msg.transform.rotation.z = pose_msg.pose.orientation.z;
     msg.transform.rotation.w = pose_msg.pose.orientation.w;
+    
     if (_publish_odom_tf)
         br.sendTransform(msg);
 
@@ -1635,18 +1635,14 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
         _imu_publishers[stream_index].publish(odom_msg);
         ROS_DEBUG("Published %s stream", rs2_stream_to_string(frame.get_profile().stream_type()));
     }
-    
-    if (_enable[POSE_STAMPED])
-    { // --- Publish the PoseStamped message ---
-        pose_msg.header.stamp = t;
-        // Here, we set the header frame to match the odometry (adjust as needed)
-        pose_msg.header.frame_id = _odom_frame_id;
-        // Remove the check for subscribers to always publish the message:
-        ROS_INFO("About to publish PoseStamped Message!!!");
-        _imu_publishers[POSE_STAMPED].publish(pose_msg);
-        ROS_DEBUG("Published PoseStamped message on /camera/pose/sample");
-    }
-    // Publish any metadata as before
+
+    // --- ✅ Publish the PoseStamped message ---
+    pose_msg.header.stamp = t;
+    pose_msg.header.frame_id = _odom_frame_id;
+    _pose_stamped_pub.publish(pose_msg);
+    ROS_DEBUG("Published PoseStamped message on /camera/pose/sample");
+
+    // Publish metadata
     publishMetadata(frame, _frame_id[POSE]);
 }
 
