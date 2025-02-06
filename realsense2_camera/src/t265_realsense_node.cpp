@@ -2,6 +2,7 @@
 
 using namespace realsense2_camera;
 
+
 T265RealsenseNode::T265RealsenseNode(ros::NodeHandle& nodeHandle,
                                      ros::NodeHandle& privateNodeHandle,
                                      rs2::device dev,
@@ -9,14 +10,12 @@ T265RealsenseNode::T265RealsenseNode(ros::NodeHandle& nodeHandle,
     : BaseRealSenseNode(nodeHandle, privateNodeHandle, dev, serial_no),
       _wo_snr(dev.first<rs2::wheel_odometer>()),
       _use_odom_in(false)
+
 {
+    pose_pub_ = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/sample", 10);
     _monitor_options = {RS2_OPTION_ASIC_TEMPERATURE, RS2_OPTION_MOTION_MODULE_TEMPERATURE};
     initializeOdometryInput();
-    handleWarning();
-    
-    //ros::Publisher pose_pub_;
-    pose_pub_ = _node_handle.advertise<geometry_msgs::PoseStamped>("/camera/pose/pose", 10);
-    
+    handleWarning(); 
 }
 
 void T265RealsenseNode::initializeOdometryInput()
@@ -83,12 +82,11 @@ void T265RealsenseNode::setupSubscribers()
     ROS_INFO_STREAM("Subscribing to in_odom topic: " << topic_odom_in);
 
     _odom_subscriber = _node_handle.subscribe(topic_odom_in, 1, &T265RealsenseNode::odom_in_callback, this);
-    _odom_subscriber = _node_handle.subscribe("/camera/pose/pose", 10, &T265RealsenseNode::odom_in_callback, this);
+    //_odom_subscriber = _node_handle.subscribe("/camera/pose/sample", 10, &T265RealsenseNode::odom_in_callback, this);
 }
 
 void T265RealsenseNode::odom_in_callback(const nav_msgs::Odometry::ConstPtr& msg)
 {
-    ROS_DEBUG("Got in_odom message");
     ROS_DEBUG("Got in_odom message");
     if (msg->pose.pose.position.x == 0 && msg->pose.pose.position.y == 0 && msg->pose.pose.position.z == 0) {
         ROS_WARN("Received odometry with zero position");
@@ -103,6 +101,8 @@ void T265RealsenseNode::odom_in_callback(const nav_msgs::Odometry::ConstPtr& msg
 
     ROS_DEBUG_STREAM("Add odom: " << velocity.x << ", " << velocity.y << ", " << velocity.z);
     _wo_snr.send_wheel_odometry(0, 0, velocity);
+
+    publishPoseStamped(msg);
 }
 
 void T265RealsenseNode::calcAndPublishStaticTransform(const stream_index_pair& stream, const rs2::stream_profile& base_profile)

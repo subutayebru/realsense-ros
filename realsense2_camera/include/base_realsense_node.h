@@ -15,6 +15,7 @@
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <tf/transform_broadcaster.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <condition_variable>
@@ -163,6 +164,7 @@ namespace realsense2_camera
         std::map<stream_index_pair, std::string> _optical_frame_id;
         std::map<stream_index_pair, std::string> _depth_aligned_frame_id;
         ros::NodeHandle& _node_handle, _pnh;
+        ros::Publisher pose_pub_;
         bool _align_depth;
         std::vector<rs2_option> _monitor_options;
         std::shared_ptr<ros::ServiceServer> _device_info_srv;
@@ -303,6 +305,7 @@ namespace realsense2_camera
         std::map<stream_index_pair, std::vector<rs2::stream_profile>> _enabled_profiles;
 
         ros::Publisher _pointcloud_publisher;
+        //ros::Publisher pose_pub_;
         ros::Time _ros_time_base;
         bool _sync_frames;
         bool _pointcloud;

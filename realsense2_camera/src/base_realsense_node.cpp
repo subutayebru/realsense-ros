@@ -1029,6 +1029,11 @@ void BaseRealSenseNode::setupPublishers()
         _metadata_publishers[POSE] = std::make_shared<ros::Publisher>(_node_handle.advertise<realsense2_camera::Metadata>("odom/metadata", 1));
     }
 
+    if (_enable[POSE_STAMPED])
+    {
+        _imu_publishers[POSE_STAMPED] = _node_handle.advertise<geometry_msgs::PoseStamped>("pose/sample", 100);
+        _metadata_publishers[POSE_STAMPED] = std::make_shared<ros::Publisher>(_node_handle.advertise<realsense2_camera::Metadata>("pose/metadata", 1));
+    }
 
 
     if (_enable[FISHEYE] &&
@@ -1549,19 +1554,24 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
                 rs2_stream_to_string(frame.get_profile().stream_type()),
                 frame.get_profile().stream_index(),
                 rs2_timestamp_domain_to_string(frame.get_frame_timestamp_domain()));
+
+    // Use the key for the pose stream (assumed defined as POSE)
     const auto& stream_index(POSE);
     rs2_pose pose = frame.as<rs2::pose_frame>().get_pose_data();
     ros::Time t(frameSystemTimeSec(frame));
 
+    // Build the PoseStamped message using the pose data
     geometry_msgs::PoseStamped pose_msg;
+    // The coordinate conversion here mirrors the odometry conversion:
     pose_msg.pose.position.x = -pose.translation.z;
     pose_msg.pose.position.y = -pose.translation.x;
-    pose_msg.pose.position.z = pose.translation.y;
+    pose_msg.pose.position.z =  pose.translation.y;
     pose_msg.pose.orientation.x = -pose.rotation.z;
     pose_msg.pose.orientation.y = -pose.rotation.x;
-    pose_msg.pose.orientation.z = pose.rotation.y;
-    pose_msg.pose.orientation.w = pose.rotation.w;
+    pose_msg.pose.orientation.z =  pose.rotation.y;
+    pose_msg.pose.orientation.w =  pose.rotation.w;
 
+    // (Broadcast TF as before)
     static tf2_ros::TransformBroadcaster br;
     geometry_msgs::TransformStamped msg;
     msg.header.stamp = t;
@@ -1574,36 +1584,35 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
     msg.transform.rotation.y = pose_msg.pose.orientation.y;
     msg.transform.rotation.z = pose_msg.pose.orientation.z;
     msg.transform.rotation.w = pose_msg.pose.orientation.w;
+    if (_publish_odom_tf)
+        br.sendTransform(msg);
 
-    if (_publish_odom_tf) br.sendTransform(msg);
-
+    // Publish the odometry message
     if (0 != _imu_publishers[stream_index].getNumSubscribers())
     {
-        double cov_pose(_linear_accel_cov * pow(10, 3-(int)pose.tracker_confidence));
-        double cov_twist(_angular_velocity_cov * pow(10, 1-(int)pose.tracker_confidence));
+        double cov_pose(_linear_accel_cov * pow(10, 3 - (int)pose.tracker_confidence));
+        double cov_twist(_angular_velocity_cov * pow(10, 1 - (int)pose.tracker_confidence));
 
         geometry_msgs::Vector3Stamped v_msg;
         v_msg.vector.x = -pose.velocity.z;
         v_msg.vector.y = -pose.velocity.x;
-        v_msg.vector.z = pose.velocity.y;
+        v_msg.vector.z =  pose.velocity.y;
         tf::Vector3 tfv;
-        tf::vector3MsgToTF(v_msg.vector,tfv);
-        tf::Quaternion q(-msg.transform.rotation.x,-msg.transform.rotation.y,-msg.transform.rotation.z,msg.transform.rotation.w);
-        tfv=tf::quatRotate(q,tfv);
-        tf::vector3TFToMsg(tfv,v_msg.vector);
-	
+        tf::vector3MsgToTF(v_msg.vector, tfv);
+        tf::Quaternion q(-msg.transform.rotation.x, -msg.transform.rotation.y, -msg.transform.rotation.z, msg.transform.rotation.w);
+        tfv = tf::quatRotate(q, tfv);
+        tf::vector3TFToMsg(tfv, v_msg.vector);
+
         geometry_msgs::Vector3Stamped om_msg;
         om_msg.vector.x = -pose.angular_velocity.z;
         om_msg.vector.y = -pose.angular_velocity.x;
-        om_msg.vector.z = pose.angular_velocity.y;
-        tf::vector3MsgToTF(om_msg.vector,tfv);
-        tfv=tf::quatRotate(q,tfv);
-        tf::vector3TFToMsg(tfv,om_msg.vector);
-	
+        om_msg.vector.z =  pose.angular_velocity.y;
+        tf::vector3MsgToTF(om_msg.vector, tfv);
+        tfv = tf::quatRotate(q, tfv);
+        tf::vector3TFToMsg(tfv, om_msg.vector);
 
         nav_msgs::Odometry odom_msg;
         _seq[stream_index] += 1;
-
         odom_msg.header.frame_id = _odom_frame_id;
         odom_msg.child_frame_id = _frame_id[POSE];
         odom_msg.header.stamp = t;
@@ -1617,17 +1626,122 @@ void BaseRealSenseNode::pose_callback(rs2::frame frame)
                                     0, 0, 0, 0, 0, cov_twist};
         odom_msg.twist.twist.linear = v_msg.vector;
         odom_msg.twist.twist.angular = om_msg.vector;
-        odom_msg.twist.covariance ={cov_pose, 0, 0, 0, 0, 0,
-                                    0, cov_pose, 0, 0, 0, 0,
-                                    0, 0, cov_pose, 0, 0, 0,
-                                    0, 0, 0, cov_twist, 0, 0,
-                                    0, 0, 0, 0, cov_twist, 0,
-                                    0, 0, 0, 0, 0, cov_twist};
+        odom_msg.twist.covariance = {cov_pose, 0, 0, 0, 0, 0,
+                                     0, cov_pose, 0, 0, 0, 0,
+                                     0, 0, cov_pose, 0, 0, 0,
+                                     0, 0, 0, cov_twist, 0, 0,
+                                     0, 0, 0, 0, cov_twist, 0,
+                                     0, 0, 0, 0, 0, cov_twist};
         _imu_publishers[stream_index].publish(odom_msg);
-        ROS_DEBUG("Publish %s stream", rs2_stream_to_string(frame.get_profile().stream_type()));
+        ROS_DEBUG("Published %s stream", rs2_stream_to_string(frame.get_profile().stream_type()));
     }
+    
+    if (_enable[POSE_STAMPED])
+    { // --- Publish the PoseStamped message ---
+        pose_msg.header.stamp = t;
+        // Here, we set the header frame to match the odometry (adjust as needed)
+        pose_msg.header.frame_id = _odom_frame_id;
+        // Remove the check for subscribers to always publish the message:
+        ROS_INFO("About to publish PoseStamped Message!!!");
+        _imu_publishers[POSE_STAMPED].publish(pose_msg);
+        ROS_DEBUG("Published PoseStamped message on /camera/pose/sample");
+    }
+    // Publish any metadata as before
     publishMetadata(frame, _frame_id[POSE]);
 }
+
+// void BaseRealSenseNode::pose_callback(rs2::frame frame)
+// {
+//     double frame_time = frame.get_timestamp();
+//     bool placeholder_false(false);
+//     if (_is_initialized_time_base.compare_exchange_strong(placeholder_false, true) )
+//     {
+//         _is_initialized_time_base = setBaseTime(frame_time, frame.get_frame_timestamp_domain());
+//     }
+
+//     ROS_DEBUG("Frame arrived: stream: %s ; index: %d ; Timestamp Domain: %s",
+//                 rs2_stream_to_string(frame.get_profile().stream_type()),
+//                 frame.get_profile().stream_index(),
+//                 rs2_timestamp_domain_to_string(frame.get_frame_timestamp_domain()));
+//     const auto& stream_index(POSE);
+//     rs2_pose pose = frame.as<rs2::pose_frame>().get_pose_data();
+//     ros::Time t(frameSystemTimeSec(frame));
+
+//     geometry_msgs::PoseStamped pose_msg;
+//     pose_msg.pose.position.x = -pose.translation.z;
+//     pose_msg.pose.position.y = -pose.translation.x;
+//     pose_msg.pose.position.z = pose.translation.y;
+//     pose_msg.pose.orientation.x = -pose.rotation.z;
+//     pose_msg.pose.orientation.y = -pose.rotation.x;
+//     pose_msg.pose.orientation.z = pose.rotation.y;
+//     pose_msg.pose.orientation.w = pose.rotation.w;
+
+//     static tf2_ros::TransformBroadcaster br;
+//     geometry_msgs::TransformStamped msg;
+//     msg.header.stamp = t;
+//     msg.header.frame_id = _odom_frame_id;
+//     msg.child_frame_id = _frame_id[POSE];
+//     msg.transform.translation.x = pose_msg.pose.position.x;
+//     msg.transform.translation.y = pose_msg.pose.position.y;
+//     msg.transform.translation.z = pose_msg.pose.position.z;
+//     msg.transform.rotation.x = pose_msg.pose.orientation.x;
+//     msg.transform.rotation.y = pose_msg.pose.orientation.y;
+//     msg.transform.rotation.z = pose_msg.pose.orientation.z;
+//     msg.transform.rotation.w = pose_msg.pose.orientation.w;
+
+//     if (_publish_odom_tf) br.sendTransform(msg);
+
+//     if (0 != _imu_publishers[stream_index].getNumSubscribers())
+//     {
+//         double cov_pose(_linear_accel_cov * pow(10, 3-(int)pose.tracker_confidence));
+//         double cov_twist(_angular_velocity_cov * pow(10, 1-(int)pose.tracker_confidence));
+
+//         geometry_msgs::Vector3Stamped v_msg;
+//         v_msg.vector.x = -pose.velocity.z;
+//         v_msg.vector.y = -pose.velocity.x;
+//         v_msg.vector.z = pose.velocity.y;
+//         tf::Vector3 tfv;
+//         tf::vector3MsgToTF(v_msg.vector,tfv);
+//         tf::Quaternion q(-msg.transform.rotation.x,-msg.transform.rotation.y,-msg.transform.rotation.z,msg.transform.rotation.w);
+//         tfv=tf::quatRotate(q,tfv);
+//         tf::vector3TFToMsg(tfv,v_msg.vector);
+	
+//         geometry_msgs::Vector3Stamped om_msg;
+//         om_msg.vector.x = -pose.angular_velocity.z;
+//         om_msg.vector.y = -pose.angular_velocity.x;
+//         om_msg.vector.z = pose.angular_velocity.y;
+//         tf::vector3MsgToTF(om_msg.vector,tfv);
+//         tfv=tf::quatRotate(q,tfv);
+//         tf::vector3TFToMsg(tfv,om_msg.vector);
+	
+
+//         nav_msgs::Odometry odom_msg;
+//         _seq[stream_index] += 1;
+
+//         odom_msg.header.frame_id = _odom_frame_id;
+//         odom_msg.child_frame_id = _frame_id[POSE];
+//         odom_msg.header.stamp = t;
+//         odom_msg.header.seq = _seq[stream_index];
+//         odom_msg.pose.pose = pose_msg.pose;
+//         odom_msg.pose.covariance = {cov_pose, 0, 0, 0, 0, 0,
+//                                     0, cov_pose, 0, 0, 0, 0,
+//                                     0, 0, cov_pose, 0, 0, 0,
+//                                     0, 0, 0, cov_twist, 0, 0,
+//                                     0, 0, 0, 0, cov_twist, 0,
+//                                     0, 0, 0, 0, 0, cov_twist};
+//         odom_msg.twist.twist.linear = v_msg.vector;
+//         odom_msg.twist.twist.angular = om_msg.vector;
+//         odom_msg.twist.covariance ={cov_pose, 0, 0, 0, 0, 0,
+//                                     0, cov_pose, 0, 0, 0, 0,
+//                                     0, 0, cov_pose, 0, 0, 0,
+//                                     0, 0, 0, cov_twist, 0, 0,
+//                                     0, 0, 0, 0, cov_twist, 0,
+//                                     0, 0, 0, 0, 0, cov_twist};
+//         _imu_publishers[stream_index].publish(odom_msg);
+//         ROS_DEBUG("Publish %s stream", rs2_stream_to_string(frame.get_profile().stream_type()));
+//     }
+//     publishMetadata(frame, _frame_id[POSE]);
+// }
 
 void BaseRealSenseNode::frame_callback(rs2::frame frame)
 {

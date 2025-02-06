@@ -10,6 +10,7 @@ set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 find_package(catkin REQUIRED COMPONENTS
     message_generation
     nav_msgs
+    geometry_msgs
     roscpp
     sensor_msgs
     std_msgs
